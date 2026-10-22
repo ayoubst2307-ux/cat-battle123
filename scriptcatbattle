@@ -1,0 +1,225 @@
+repeat task.wait() until game:IsLoaded()
+
+-- ============================================================
+--  VÉRIF JEU
+-- ============================================================
+local Cloneref    = cloneref or function(i) return i end
+local Players     = Cloneref(game:GetService("Players"))
+local RunService  = Cloneref(game:GetService("RunService"))
+local UIS         = Cloneref(game:GetService("UserInputService"))
+local LocalPlayer = Players.LocalPlayer
+
+if game.PlaceId ~= 130906410042392 then
+    LocalPlayer:Kick("❌ CatBattles Hub | Mauvais jeu")
+    return
+end
+
+-- ============================================================
+--  GUI
+-- ============================================================
+local gui = Instance.new("ScreenGui")
+gui.Name           = "CatBattlesHub"
+gui.ResetOnSpawn   = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent         = gethui and gethui() or LocalPlayer:WaitForChild("PlayerGui")
+
+local function mk(class, props, parent)
+    local i = Instance.new(class)
+    for k,v in pairs(props) do i[k] = v end
+    i.Parent = parent
+    return i
+end
+
+-- Fenêtre
+local Win = mk("Frame", {
+    Size            = UDim2.fromOffset(340, 200),
+    Position        = UDim2.fromScale(0.5, 0.5),
+    AnchorPoint     = Vector2.new(0.5, 0.5),
+    BackgroundColor3= Color3.fromRGB(15, 15, 22),
+    BorderSizePixel = 0,
+    Active          = true,
+    Draggable       = true,
+}, gui)
+mk("UICorner",  { CornerRadius = UDim.new(0,10) }, Win)
+mk("UIStroke",  { Color = Color3.fromRGB(100,60,255), Thickness = 1.5 }, Win)
+
+-- Header
+local Header = mk("Frame", {
+    Size            = UDim2.new(1,0,0,42),
+    BackgroundColor3= Color3.fromRGB(25,15,55),
+    BorderSizePixel = 0,
+}, Win)
+mk("UICorner", { CornerRadius = UDim.new(0,10) }, Header)
+mk("TextLabel", {
+    Size             = UDim2.new(1,0,1,0),
+    BackgroundTransparency = 1,
+    Text             = "🐱  CatBattles Hub",
+    TextColor3       = Color3.fromRGB(255,255,255),
+    TextSize         = 16,
+    Font             = Enum.Font.GothamBold,
+}, Header)
+
+-- Status
+local StatusLbl = mk("TextLabel", {
+    Size                   = UDim2.new(1,-20,0,18),
+    Position               = UDim2.fromOffset(10,48),
+    BackgroundTransparency = 1,
+    Text                   = "⬤  En attente...",
+    TextColor3             = Color3.fromRGB(150,150,170),
+    TextSize               = 12,
+    Font                   = Enum.Font.Gotham,
+    TextXAlignment         = Enum.TextXAlignment.Left,
+}, Win)
+
+local function setstatus(txt, col)
+    StatusLbl.Text       = txt
+    StatusLbl.TextColor3 = col or Color3.fromRGB(150,150,170)
+end
+
+-- Toggle helper
+local function mkbtn(label, y, active_col)
+    local active = false
+    local btn = mk("TextButton", {
+        Size             = UDim2.new(1,-20,0,34),
+        Position         = UDim2.fromOffset(10, y),
+        BackgroundColor3 = Color3.fromRGB(30,20,60),
+        BorderSizePixel  = 0,
+        Text             = label .. "  [ OFF ]",
+        TextColor3       = Color3.fromRGB(200,200,220),
+        TextSize         = 13,
+        Font             = Enum.Font.GothamBold,
+    }, Win)
+    mk("UICorner", { CornerRadius = UDim.new(0,6) }, btn)
+    mk("UIStroke", { Color = Color3.fromRGB(60,40,140), Thickness = 1 }, btn)
+
+    btn.MouseButton1Click:Connect(function()
+        active = not active
+        btn.Text             = label .. (active and "  [ ON ]" or "  [ OFF ]")
+        btn.BackgroundColor3 = active and active_col or Color3.fromRGB(30,20,60)
+    end)
+    return btn, function() return active end
+end
+
+local BtnESP,   esp_on   = mkbtn("👁  ESP",          76,  Color3.fromRGB(60,40,180))
+local BtnPunch, punch_on = mkbtn("💥  Punch Harder", 118, Color3.fromRGB(140,30,30))
+local BtnFly,   fly_on   = mkbtn("🕊  No Knockback",  160, Color3.fromRGB(30,100,50))
+
+-- ============================================================
+--  ESP
+-- ============================================================
+local esp_cache: { [Player]: { box:any, name:any, hp:any } } = {}
+local Camera = workspace.CurrentCamera
+
+local function esp_add(p)
+    if esp_cache[p] then return end
+    local function sq(filled, col)
+        local d = Drawing.new("Square")
+        d.Thickness = 1.5; d.Filled = filled
+        d.Color = col; d.Visible = false
+        return d
+    end
+    local function tx()
+        local d = Drawing.new("Text")
+        d.Size = 12; d.Center = true; d.Outline = true
+        d.Color = Color3.fromRGB(255,255,255); d.Visible = false
+        return d
+    end
+    esp_cache[p] = { box = sq(false, Color3.fromRGB(255,60,60)), name = tx(), hp = sq(true, Color3.fromRGB(60,255,60)) }
+end
+
+local function esp_remove(p)
+    if not esp_cache[p] then return end
+    for _,d in pairs(esp_cache[p]) do d:Remove() end
+    esp_cache[p] = nil
+end
+
+local function esp_hide(p)
+    if not esp_cache[p] then return end
+    esp_cache[p].box.Visible  = false
+    esp_cache[p].name.Visible = false
+    esp_cache[p].hp.Visible   = false
+end
+
+Players.PlayerRemoving:Connect(esp_remove)
+
+RunService.RenderStepped:Connect(function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LocalPlayer then continue end
+        local char = p.Character
+        if not char then esp_hide(p); continue end
+        local root = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+        local hum  = char:FindFirstChildOfClass("Humanoid")
+        if not root or not hum then esp_hide(p); continue end
+
+        if not esp_on() then esp_hide(p); continue end
+
+        esp_add(p)
+        local ds = esp_cache[p]
+        local sp, vis = Camera:WorldToViewportPoint(root.Position)
+
+        if not vis then esp_hide(p); continue end
+
+        local dist  = (root.Position - Camera.CFrame.Position).Magnitude
+        local scale = 1600 / dist
+        local bw, bh = scale * 1.1, scale * 1.8
+
+        ds.box.Size     = Vector2.new(bw, bh)
+        ds.box.Position = Vector2.new(sp.X - bw/2, sp.Y - bh/2)
+        ds.box.Visible  = true
+
+        ds.name.Text     = p.DisplayName .. "  " .. math.floor(dist) .. "m"
+        ds.name.Position = Vector2.new(sp.X, sp.Y - bh/2 - 15)
+        ds.name.Visible  = true
+
+        local ratio   = math.clamp(hum.Health / math.max(hum.MaxHealth,1), 0, 1)
+        ds.hp.Color   = Color3.fromRGB(math.floor((1-ratio)*255), math.floor(ratio*220), 50)
+        ds.hp.Size    = Vector2.new(3, bh * ratio)
+        ds.hp.Position= Vector2.new(sp.X - bw/2 - 7, sp.Y - bh/2 + bh*(1-ratio))
+        ds.hp.Visible = true
+
+        setstatus("👁  ESP actif — " .. #Players:GetPlayers()-1 .. " joueur(s)", Color3.fromRGB(100,200,255))
+    end
+end)
+
+-- ============================================================
+--  PUNCH HARDER
+-- ============================================================
+local mt    = getrawmetatable(game)
+local old_nc = mt.__namecall
+setreadonly(mt, false)
+mt.__namecall = newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    if punch_on() and method == "FireServer" then
+        local name = (self :: Instance).Name:lower()
+        if name:find("attack") or name:find("punch") or name:find("hit") or name:find("damage") or name:find("swing") then
+            local args = {...}
+            for i,v in ipairs(args) do
+                if type(v) == "number" and v > 0 and v < 99999 then
+                    args[i] = v * 50
+                end
+            end
+            return old_nc(self, table.unpack(args))
+        end
+    end
+    return old_nc(self, ...)
+end)
+setreadonly(mt, true)
+
+-- ============================================================
+--  NO KNOCKBACK
+-- ============================================================
+RunService.Stepped:Connect(function()
+    if not fly_on() then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+    if not root then return end
+    local vel = root.AssemblyLinearVelocity
+    -- annule la vélocité horizontale imposée de l'extérieur
+    if vel.Magnitude > 60 then
+        root.AssemblyLinearVelocity = Vector3.new(vel.X * 0.05, vel.Y, vel.Z * 0.05)
+    end
+end)
+
+setstatus("✅  Cheat chargé — active les toggles !", Color3.fromRGB(60,255,120))
+print("[CatBattlesHub] loaded | PlaceId " .. game.PlaceId)
